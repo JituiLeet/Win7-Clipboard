@@ -14,13 +14,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
       - uses: NuGet/setup-nuget@v2
-      - name: Restore .NET Framework 4.0 reference assemblies
-        run: nuget install Microsoft.NETFramework.ReferenceAssemblies.net40 -Version 1.0.3 -OutputDirectory packages -NonInteractive
+      - name: Install .NET Framework 4.0 reference assemblies
+        shell: pwsh
+        run: |
+          nuget install Microsoft.NETFramework.ReferenceAssemblies.net40 -Version 1.0.3 -OutputDirectory "$env:GITHUB_WORKSPACE\packages" -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw "NuGet reference-assembly installation failed." }
+          $framework = Join-Path $env:GITHUB_WORKSPACE "packages/Microsoft.NETFramework.ReferenceAssemblies.net40.1.0.3/build/.NETFramework/v4.0"
+          if (!(Test-Path (Join-Path $framework "mscorlib.dll"))) {
+            Get-ChildItem "$env:GITHUB_WORKSPACE/packages" -Recurse -Filter mscorlib.dll | Select-Object -ExpandProperty FullName
+            throw "The .NET Framework 4.0 reference assemblies were not found at the expected location."
+          }
+          "FRAMEWORK_PATH=$framework" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build
         shell: pwsh
         run: |
-          $framework = "$env:GITHUB_WORKSPACE\packages\Microsoft.NETFramework.ReferenceAssemblies.net40.1.0.3\build\.NETFramework"
-          msbuild Clipboard.csproj /m /t:Rebuild /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:TargetFrameworkRootPath="$framework"
+          msbuild Clipboard.csproj /m /t:Rebuild /verbosity:minimal /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:FrameworkPathOverride="$env:FRAMEWORK_PATH"
+          if ($LASTEXITCODE -ne 0) { throw "MSBuild failed for ${{ matrix.platform }}." }
+      - name: Verify output
+        shell: pwsh
+        run: |
+          $exe = "bin/${{ matrix.platform }}/Release/Clipboard.exe"
+          if (!(Test-Path $exe)) { throw "Expected build output was not created: $exe" }
       - name: Package
         shell: pwsh
         run: |
